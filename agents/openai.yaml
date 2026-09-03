@@ -1,0 +1,7 @@
+interface:
+  display_name: "Понимание задачи"
+  short_description: "Превращает материалы клиента в согласованную задачу"
+  default_prompt: "Используй $task-understanding, чтобы прояснить внешнюю клиентскую задачу и вести живой файл постановки; если нужны уточнения, сначала задай только блокирующие вопросы."
+
+policy:
+  allow_implicit_invocation: false
