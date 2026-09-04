@@ -1,0 +1,64 @@
+name: Сообщить об ошибке
+description: Воспроизводимая проблема в поведении или документации Skill
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за отчёт. Используйте только синтетические или обезличенные данные. Уязвимости отправляйте через приватный security advisory, а не через эту форму.
+  - type: dropdown
+    id: client
+    attributes:
+      label: Клиент
+      options:
+        - Codex CLI или IDE
+        - Cursor
+        - Claude Code
+        - Другое совместимое окружение
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Версии
+      description: Версия task-understanding и версия клиента.
+      placeholder: task-understanding v0.1.0; Codex CLI 0.153.0
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги воспроизведения
+      description: Приведите минимальный сценарий на синтетических данных.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемое поведение
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактическое поведение
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Дополнительный контекст
+      description: При необходимости приложите обезличенный фрагмент или ссылку на минимальный публичный пример.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Подтверждения
+      options:
+        - label: Я проверил существующие Issues и не нашёл дубликата.
+          required: true
+        - label: Отчёт не содержит клиентских, персональных или секретных данных.
+          required: true
+        - label: Это не приватный отчёт об уязвимости.
+          required: true

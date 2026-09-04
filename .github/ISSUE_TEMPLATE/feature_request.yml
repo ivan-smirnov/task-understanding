@@ -1,0 +1,55 @@
+name: Предложить улучшение
+description: Новая возможность или изменение поведения Skill
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Опишите пользовательскую проблему и наблюдаемый результат. Не прикладывайте реальные клиентские материалы.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Проблема
+      description: Какой сценарий сейчас невозможно или неудобно выполнить?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Желаемое поведение
+      description: Что должен наблюдать пользователь после изменения?
+    validations:
+      required: true
+  - type: dropdown
+    id: clients
+    attributes:
+      label: Затронутые клиенты
+      multiple: true
+      options:
+        - Codex
+        - Cursor
+        - Claude Code
+        - Все совместимые Agent Skills-клиенты
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы
+      description: Какие обходные пути или другие решения вы уже рассматривали?
+  - type: textarea
+    id: example
+    attributes:
+      label: Синтетический пример
+      description: Минимальный обезличенный вход и ожидаемый результат, если они помогают понять предложение.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Подтверждения
+      options:
+        - label: Я проверил существующие Issues и не нашёл такого предложения.
+          required: true
+        - label: Предложение не содержит клиентских, персональных или секретных данных.
+          required: true

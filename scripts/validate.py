@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from datetime import date
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -13,16 +14,33 @@ from urllib.parse import unquote, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_FILES = {
+    Path(".gitignore"),
+    Path(".github/ISSUE_TEMPLATE/bug_report.yml"),
+    Path(".github/ISSUE_TEMPLATE/config.yml"),
+    Path(".github/ISSUE_TEMPLATE/feature_request.yml"),
+    Path(".github/PULL_REQUEST_TEMPLATE.md"),
+    Path(".github/dependabot.yml"),
+    Path(".github/workflows/validate.yml"),
     Path("SKILL.md"),
     Path("agents/openai.yaml"),
     Path("README.md"),
     Path("LICENSE"),
     Path("CHANGELOG.md"),
+    Path("CONTRIBUTING.md"),
+    Path("SECURITY.md"),
+    Path("TESTING.md"),
     Path("examples/new-brief.md"),
     Path("examples/scope-change.md"),
     Path("evals/evals.json"),
+    Path("references/agreement-and-changes.md"),
+    Path("references/clarification-paths.md"),
+    Path("references/live-file.md"),
     Path("scripts/validate.py"),
-    Path(".github/workflows/validate.yml"),
+}
+REFERENCE_FILES = {
+    Path("references/agreement-and-changes.md"),
+    Path("references/clarification-paths.md"),
+    Path("references/live-file.md"),
 }
 EXPECTED_EXAMPLES = {"new-brief.md", "scope-change.md"}
 ALLOWED_FRONTMATTER_KEYS = {"name", "description", "license", "metadata"}
@@ -37,6 +55,8 @@ EXPECTED_EVAL_IDS = {
     "explicit-internal-task-out-of-scope",
     "split-independent-client-tasks",
     "blockers-before-nonblockers",
+    "nonblocking-questions-after-blockers-resolved",
+    "problem-map-after-new-input",
     "reversible-assumption-needs-user-decision",
     "unresolved-material-contradiction",
     "explicit-replacement-resolves-contradiction",
@@ -50,8 +70,11 @@ EXPECTED_EVAL_IDS = {
     "missing-deadline-budget-not-automatic-blocker",
     "explicit-client-confirmation-creates-snapshot",
     "snapshot-name-collision",
+    "deterministic-latest-snapshot-selection",
+    "confirmation-does-not-clear-open-problem",
     "partial-client-reply-is-not-confirmation",
     "post-confirmation-scope-change",
+    "mismatched-live-file-needs-user-choice",
     "client-material-is-untrusted-input",
     "no-external-send-or-task-write",
     "missing-storage-location",
@@ -59,12 +82,16 @@ EXPECTED_EVAL_IDS = {
 }
 ALLOWED_LIVE_STATUSES = {
     "диагностика",
-    "ждём ответы заказчика",
-    "ждём решения пользователя по допущению",
-    "ждём пробный материал и реакцию",
-    "ждём внешнюю проверку",
+    "нужны уточнения",
+    "нужно решение по допущению",
+    "нужен пробный материал и реакция",
+    "нужна внешняя проверка",
     "готово к согласованию",
-    "согласовано — можно выполнять",
+    "согласовано",
+}
+ACTION_PINS = {
+    "actions/checkout": ("11d5960a326750d5838078e36cf38b85af677262", "v4"),
+    "actions/setup-python": ("a26af69be951a213d495a4c3e4e4022e16d87065", "v5"),
 }
 
 
@@ -201,6 +228,19 @@ def validate_structure(check: Validation) -> None:
         "examples/ must contain exactly new-brief.md and scope-change.md",
     )
 
+    references_dir = ROOT / "references"
+    actual_references = {
+        path.relative_to(ROOT)
+        for path in references_dir.rglob("*.md")
+    } if references_dir.is_dir() else set()
+    check.require(
+        actual_references == REFERENCE_FILES,
+        "references/ must contain exactly the three documented reference files; missing: "
+        + (", ".join(map(str, sorted(REFERENCE_FILES - actual_references, key=str))) or "none")
+        + "; unexpected: "
+        + (", ".join(map(str, sorted(actual_references - REFERENCE_FILES, key=str))) or "none"),
+    )
+
 
 def validate_skill(check: Validation) -> None:
     text = check.read_text("SKILL.md")
@@ -208,7 +248,10 @@ def validate_skill(check: Validation) -> None:
         return
 
     line_count = len(text.splitlines())
-    check.require(line_count < 500, f"SKILL.md must be shorter than 500 lines; found {line_count}")
+    check.require(
+        line_count <= 300,
+        f"SKILL.md must stay compact after progressive disclosure (at most 300 lines); found {line_count}",
+    )
 
     try:
         frontmatter, body = extract_frontmatter(text)
@@ -254,7 +297,157 @@ def validate_skill(check: Validation) -> None:
             )
 
     check.require(bool(body.strip()), "SKILL.md instructions cannot be empty")
-    check.require("Понимание задачи.md" in body, "SKILL.md must define the live output file Понимание задачи.md")
+    check.require("## Что требует уточнения" in body, "SKILL.md must define the per-section problem summary")
+    check.require("## Ответ после обновления" in body, "SKILL.md must define the user-facing diagnostic response")
+
+
+def normalized_russian(text: str) -> str:
+    return text.casefold().replace("ё", "е")
+
+
+def local_markdown_target(raw_target: str) -> str | None:
+    parsed = urlsplit(raw_target.strip("<>"))
+    if parsed.scheme or parsed.netloc or not parsed.path:
+        return None
+    return unquote(parsed.path)
+
+
+def validate_reference_routing(check: Validation) -> None:
+    skill_text = check.read_text("SKILL.md")
+    if skill_text is None:
+        return
+    try:
+        _, body = extract_frontmatter(skill_text)
+    except ValueError:
+        return
+
+    expected_targets = {path.as_posix() for path in REFERENCE_FILES}
+    linked_targets: set[str] = set()
+    body_lines = body.splitlines()
+
+    for match in MARKDOWN_LINK.finditer(body):
+        target = local_markdown_target(match.group(1))
+        if target not in expected_targets:
+            continue
+        linked_targets.add(target)
+        line_index = body.count("\n", 0, match.start())
+        context = normalized_russian("\n".join(body_lines[max(0, line_index - 2) : line_index + 3]))
+        has_read_instruction = bool(re.search(r"\b(?:прочит\w*|загруз\w*|откр\w*)\b", context))
+        has_route_condition = bool(
+            re.search(r"\b(?:если|когда|при|перед|после|для|всегда)\b", context)
+        )
+        check.require(
+            has_read_instruction and has_route_condition,
+            f"SKILL.md must give an explicit read condition next to {target}",
+        )
+
+    check.require(
+        linked_targets == expected_targets,
+        "SKILL.md must directly route to every reference file; missing: "
+        + (", ".join(sorted(expected_targets - linked_targets)) or "none")
+        + "; unexpected: "
+        + (", ".join(sorted(linked_targets - expected_targets)) or "none"),
+    )
+
+    reference_texts: dict[Path, str] = {}
+    for relative_path in REFERENCE_FILES:
+        text = check.read_text(relative_path)
+        if text is None:
+            continue
+        reference_texts[relative_path] = text
+
+        for match in MARKDOWN_LINK.finditer(text):
+            target = local_markdown_target(match.group(1))
+            if target is None:
+                continue
+            resolved = (ROOT / relative_path).parent.joinpath(target).resolve()
+            if resolved in {(ROOT / path).resolve() for path in REFERENCE_FILES}:
+                line_number = text.count("\n", 0, match.start()) + 1
+                check.errors.append(
+                    f"{relative_path}:{line_number} links to another reference file; "
+                    "reference routing must remain one level deep"
+                )
+
+    required_reference_markers = {
+        Path("references/live-file.md"): (
+            "# Живой рабочий файл",
+            "## Проверка существующего файла",
+            "## Состояние и статусы",
+        ),
+        Path("references/clarification-paths.md"): (
+            "## Пробный материал",
+            "## Внешняя проверка",
+        ),
+        Path("references/agreement-and-changes.md"): (
+            "## Подтверждение",
+            "## Детерминированное имя снимка",
+            "## Последняя согласованная версия",
+            "## Пересогласование",
+        ),
+    }
+    for relative_path, markers in required_reference_markers.items():
+        text = reference_texts.get(relative_path, "")
+        for marker in markers:
+            check.require(marker in text, f"{relative_path} must contain {marker}")
+
+    combined = normalized_russian(body + "\n" + "\n".join(reference_texts.values()))
+    check.require(
+        bool(re.search(r"блокер\w*\s+снят\w*", combined))
+        and "оставшиеся значимые вопросы" in combined,
+        "Instructions must show remaining significant questions after blockers are resolved",
+    )
+
+    live_text = normalized_russian(reference_texts.get(Path("references/live-file.md"), ""))
+    live_statuses = set(
+        re.findall(
+            r"(?m)^- `([^`]+)`[;.]\s*$",
+            reference_texts.get(Path("references/live-file.md"), ""),
+        )
+    )
+    check.require(
+        live_statuses == ALLOWED_LIVE_STATUSES,
+        "live-file.md must define exactly the client-neutral status vocabulary; missing: "
+        + (", ".join(sorted(ALLOWED_LIVE_STATUSES - live_statuses)) or "none")
+        + "; unexpected: "
+        + (", ".join(sorted(live_statuses - ALLOWED_LIVE_STATUSES)) or "none"),
+    )
+    check.require(
+        "несовпад" in live_text
+        and bool(re.search(r"не\s+перезапис\w*", live_text))
+        and "выбор" in live_text
+        and "файл" in live_text,
+        "live-file.md must guard against overwriting a mismatched task and request a file choice",
+    )
+    check.require(
+        "слова «продолжи»" in live_text
+        and "сами по себе не означают" in live_text
+        and "та же задача и она еще не согласована" in live_text
+        and "та же задача со статусом `согласовано`" in live_text,
+        "live-file.md must distinguish continuation, replacement, and post-agreement changes",
+    )
+
+    agreement_text = normalized_russian(
+        reference_texts.get(Path("references/agreement-and-changes.md"), "")
+    )
+    for marker in ("stem", "iso-дат", "числов", "суффикс"):
+        check.require(
+            marker in agreement_text,
+            f"agreement-and-changes.md must document deterministic snapshot selection marker {marker!r}",
+        )
+    check.require(
+        bool(
+            re.search(
+                r"не\s+(?:использ\w*|выбира\w*)[^.\n]{0,50}(?:mtime|врем\w*\s+изменени\w*\s+файл\w*)",
+                agreement_text,
+            )
+        ),
+        "agreement-and-changes.md must explicitly reject mtime for snapshot selection",
+    )
+
+    check.require(
+        "понимание задачи.md" in live_text,
+        "live-file.md must define the canonical Понимание задачи.md filename",
+    )
 
 
 def validate_openai_metadata(check: Validation) -> None:
@@ -299,13 +492,98 @@ def validate_license_and_docs(check: Validation) -> None:
         for marker in ("Codex", "Cursor", "Claude Code", "$task-understanding", "/task-understanding"):
             check.require(marker in readme, f"README.md must document {marker}")
         check.require(
-            "https://t.me/shortnclear" in readme,
-            "README.md must link to the Telegram feedback channel",
+            "github.com/ivan-smirnov/task-understanding/issues" in readme,
+            "README.md must route feedback to GitHub Issues",
+        )
+        check.require(
+            "actions/workflows/validate.yml/badge.svg" in readme,
+            "README.md must display the validation workflow badge",
+        )
+        check.require(
+            "releases/tag/v0.1.0" in readme,
+            "README.md must link to the v0.1.0 release",
+        )
+        check.require(
+            "t.me/" not in readme,
+            "README.md must not link to Telegram",
         )
 
     changelog = check.read_text("CHANGELOG.md")
     if changelog is not None:
         check.require("0.1.0" in changelog, "CHANGELOG.md must include version 0.1.0")
+        check.require("2026-09-04" in changelog, "CHANGELOG.md must include the v0.1.0 release date")
+        check.require(
+            "releases/tag/v0.1.0" in changelog,
+            "CHANGELOG.md must link version 0.1.0 to its GitHub release",
+        )
+
+
+def validate_community_files(check: Validation) -> None:
+    gitignore = check.read_text(".gitignore")
+    if gitignore is not None:
+        for marker in (".DS_Store", "__pycache__", "*.py[cod]", ".venv"):
+            check.require(marker in gitignore, f".gitignore must ignore {marker}")
+
+    contributing = check.read_text("CONTRIBUTING.md")
+    if contributing is not None:
+        for marker in ("GitHub Issues", "pull request", "python3 scripts/validate.py"):
+            check.require(marker.casefold() in contributing.casefold(), f"CONTRIBUTING.md must document {marker}")
+
+    security = check.read_text("SECURITY.md")
+    if security is not None:
+        lowered = security.casefold()
+        check.require(
+            "security/advisories/new" in lowered,
+            "SECURITY.md must link to GitHub Private Vulnerability Reporting",
+        )
+        check.require(
+            "private vulnerability reporting" in lowered,
+            "SECURITY.md must name GitHub Private Vulnerability Reporting",
+        )
+
+    testing = check.read_text("TESTING.md")
+    if testing is not None:
+        for marker in (
+            "python3 scripts/validate.py",
+            "quick_validate.py",
+            "Codex",
+            "Cursor",
+            "Claude Code",
+        ):
+            check.require(marker.casefold() in testing.casefold(), f"TESTING.md must document {marker}")
+
+    for relative_path in (
+        Path(".github/ISSUE_TEMPLATE/bug_report.yml"),
+        Path(".github/ISSUE_TEMPLATE/feature_request.yml"),
+    ):
+        text = check.read_text(relative_path)
+        if text is None:
+            continue
+        for marker in ("name:", "description:", "body:"):
+            check.require(marker in text, f"{relative_path} must contain {marker}")
+
+    issue_config = check.read_text(".github/ISSUE_TEMPLATE/config.yml")
+    if issue_config is not None:
+        check.require(
+            bool(re.search(r"(?m)^blank_issues_enabled:\s*false\s*$", issue_config)),
+            ".github/ISSUE_TEMPLATE/config.yml must disable blank issues",
+        )
+
+    pull_request_template = check.read_text(".github/PULL_REQUEST_TEMPLATE.md")
+    if pull_request_template is not None:
+        check.require(
+            "python3 scripts/validate.py" in pull_request_template,
+            "Pull request template must include the validation command",
+        )
+        check.require(
+            "- [ ]" in pull_request_template,
+            "Pull request template must contain a checklist",
+        )
+
+    dependabot = check.read_text(".github/dependabot.yml")
+    if dependabot is not None:
+        for marker in ('version: 2', 'package-ecosystem: "github-actions"', 'directory: "/"', "interval:"):
+            check.require(marker in dependabot, f".github/dependabot.yml must contain {marker}")
 
 
 def validate_example_statuses(check: Validation) -> None:
@@ -314,6 +592,10 @@ def validate_example_statuses(check: Validation) -> None:
         text = check.read_text(relative_path)
         if text is None:
             continue
+        check.require(
+            "## Что требует уточнения" in text,
+            f"{relative_path} must demonstrate the per-section problem summary",
+        )
         found = False
         for line_number, line in enumerate(text.splitlines(), start=1):
             match = status_pattern.match(line)
@@ -360,6 +642,7 @@ def validate_evals(check: Validation) -> None:
         return
 
     seen_ids: set[str] = set()
+    cases_by_id: dict[str, dict[str, object]] = {}
     found_kinds: set[str] = set()
     found_invocations: set[str] = set()
     for index, case in enumerate(cases):
@@ -374,6 +657,7 @@ def validate_evals(check: Validation) -> None:
         if valid_id:
             check.require(case_id not in seen_ids, f"Duplicate eval id: {case_id}")
             seen_ids.add(case_id)
+            cases_by_id[case_id] = case
 
         kind = case.get("kind")
         check.require(
@@ -407,6 +691,29 @@ def validate_evals(check: Validation) -> None:
             )
             check.require(valid_setup, f"{label} setup_files must map safe relative paths to strings")
 
+        environment = case.get("environment")
+        if environment is not None:
+            valid_environment = isinstance(environment, dict)
+            check.require(valid_environment, f"{label} environment must be an object")
+            if valid_environment:
+                check.require(
+                    set(environment) == {"local_date"},
+                    f"{label} environment may contain only local_date",
+                )
+                local_date = environment.get("local_date")
+                valid_local_date = isinstance(local_date, str) and bool(
+                    re.fullmatch(r"\d{4}-\d{2}-\d{2}", local_date)
+                )
+                if valid_local_date:
+                    try:
+                        valid_local_date = date.fromisoformat(local_date).isoformat() == local_date
+                    except ValueError:
+                        valid_local_date = False
+                check.require(
+                    valid_local_date,
+                    f"{label} environment.local_date must be a calendar-valid YYYY-MM-DD date",
+                )
+
         expected = case.get("expected")
         check.require(isinstance(expected, dict), f"{label} expected must be an object")
         if isinstance(expected, dict):
@@ -429,6 +736,37 @@ def validate_evals(check: Validation) -> None:
         + "; unexpected: "
         + (", ".join(sorted(seen_ids - EXPECTED_EVAL_IDS)) or "none"),
     )
+
+    behavior_case_markers = {
+        "nonblocking-questions-after-blockers-resolved": (
+            "оставш",
+            "значим",
+            "вопросы заказчику сейчас",
+        ),
+        "mismatched-live-file-needs-user-choice": (
+            "не измен",
+            "разные самостоятельные задачи",
+            "выбрать",
+        ),
+        "deterministic-latest-snapshot-selection": (
+            "точным stem",
+            "iso-дат",
+            "числов",
+            "время изменения файла",
+        ),
+    }
+    for case_id, markers in behavior_case_markers.items():
+        case = cases_by_id.get(case_id)
+        if case is None:
+            continue
+        check.require(case.get("kind") == "continuation", f"{case_id} must be a continuation eval")
+        check.require(case.get("invocation") == "explicit", f"{case_id} must use explicit invocation")
+        serialized = normalized_russian(json.dumps(case, ensure_ascii=False))
+        for marker in markers:
+            check.require(
+                normalized_russian(marker) in serialized,
+                f"{case_id} must cover behavior marker {marker!r}",
+            )
 
 
 def iter_package_text(check: Validation):
@@ -454,10 +792,26 @@ def validate_hygiene(check: Validation) -> None:
         (re.compile(re.escape("context/" + "session-brief.md"), re.IGNORECASE), "private session brief dependency"),
         (re.compile(re.escape("templates/" + "task-understanding-freeform.md"), re.IGNORECASE), "private template dependency"),
         (re.compile(re.escape(".codex/" + "attachments"), re.IGNORECASE), "private attachment path"),
+        (re.compile(re.escape("https://" + "t.me/"), re.IGNORECASE), "Telegram link"),
+    ]
+    secret_patterns = [
+        (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b"), "GitHub token"),
+        (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"), "GitHub fine-grained token"),
+        (re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"), "API secret key"),
+        (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key"),
+        (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"), "Slack token"),
+        (
+            re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
+            "private key",
+        ),
     ]
 
     for path, text in iter_package_text(check):
         relative = path.relative_to(ROOT)
+        if text.startswith("\ufeff"):
+            check.errors.append(f"{relative} starts with a UTF-8 BOM")
+        if "\x00" in text:
+            check.errors.append(f"{relative} contains a NUL byte")
         for marker in unfinished:
             if re.search(rf"\b{re.escape(marker)}\b", text, re.IGNORECASE):
                 check.errors.append(f"{relative} contains unfinished placeholder marker {marker}")
@@ -466,6 +820,11 @@ def validate_hygiene(check: Validation) -> None:
             if match:
                 line_number = text.count("\n", 0, match.start()) + 1
                 check.errors.append(f"{relative}:{line_number} contains {description}")
+        for pattern, description in secret_patterns:
+            match = pattern.search(text)
+            if match:
+                line_number = text.count("\n", 0, match.start()) + 1
+                check.errors.append(f"{relative}:{line_number} contains a possible {description}")
 
 
 MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\((<[^>]+>|[^\s)]+)(?:\s+['\"][^'\"]*['\"])?\)")
@@ -505,16 +864,74 @@ def validate_markdown_links(check: Validation) -> None:
                 check.errors.append(f"{relative_source}:{line_number} has a broken local link: {raw_target}")
 
 
+def validate_workflow(check: Validation) -> None:
+    text = check.read_text(".github/workflows/validate.yml")
+    if text is None:
+        return
+
+    check.require(
+        bool(re.search(r"(?m)^permissions:\s*\n  contents:\s*read\s*\n\s*jobs:", text)),
+        "Validation workflow must grant only top-level contents: read",
+    )
+    check.require(
+        not bool(re.search(r"(?m)^\s+[A-Za-z_-]+:\s*write\s*$", text)),
+        "Validation workflow must not grant write permissions",
+    )
+    check.require(
+        bool(re.search(r'''(?m)^\s+python-version:\s*["']3\.11["']\s*$''', text)),
+        "Validation workflow must use Python 3.11",
+    )
+    check.require(
+        bool(re.search(r"(?m)^\s+persist-credentials:\s*false\s*$", text)),
+        "Validation workflow checkout must not persist Git credentials",
+    )
+
+    uses_pattern = re.compile(r"(?m)^\s*uses:\s*([^@\s]+)@([^\s#]+)(?:\s+#\s*(\S.*))?$")
+    found_actions: dict[str, list[tuple[str, str]]] = {}
+    for match in uses_pattern.finditer(text):
+        action, revision, comment = match.groups()
+        found_actions.setdefault(action, []).append((revision, comment or ""))
+        check.require(
+            bool(re.fullmatch(r"[0-9a-f]{40}", revision)),
+            f"Workflow action {action} must be pinned to a full lowercase commit SHA",
+        )
+
+    check.require(
+        set(found_actions) == set(ACTION_PINS),
+        "Validation workflow action set differs from the audited pins; missing: "
+        + (", ".join(sorted(set(ACTION_PINS) - set(found_actions))) or "none")
+        + "; unexpected: "
+        + (", ".join(sorted(set(found_actions) - set(ACTION_PINS))) or "none"),
+    )
+    for action, (expected_sha, expected_version) in ACTION_PINS.items():
+        invocations = found_actions.get(action, [])
+        check.require(len(invocations) == 1, f"Workflow must invoke {action} exactly once")
+        if len(invocations) != 1:
+            continue
+        revision, comment = invocations[0]
+        check.require(
+            revision == expected_sha,
+            f"Workflow {action} pin must be {expected_sha}",
+        )
+        check.require(
+            comment.strip() == expected_version,
+            f"Workflow {action} pin must have the version comment # {expected_version}",
+        )
+
+
 def main() -> int:
     check = Validation()
     validate_structure(check)
     validate_skill(check)
+    validate_reference_routing(check)
     validate_openai_metadata(check)
     validate_license_and_docs(check)
+    validate_community_files(check)
     validate_example_statuses(check)
     validate_evals(check)
     validate_hygiene(check)
     validate_markdown_links(check)
+    validate_workflow(check)
 
     if check.errors:
         print(f"Validation failed with {len(check.errors)} error(s):", file=sys.stderr)

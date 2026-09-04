@@ -1,0 +1,27 @@
+# Operating systems
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local configuration and logs
+.env
+.env.*
+!.env.example
+*.log
+
+# Client task artifacts accidentally created in the repository root
+/Понимание задачи*.md
