@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-05
+
 ### Изменено
 
 - Добавлены явные номера редакций, ожидаемая редакция для подтверждения и действующая согласованная версия.
@@ -38,5 +40,6 @@
 - Claude Code заявлен как beta до живого прогона.
 - Плагин, OpenAI Skills API и публикация в каталогах не входят в `0.1.0`.
 
-[Unreleased]: https://github.com/ivan-smirnov/task-understanding/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ivan-smirnov/task-understanding/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ivan-smirnov/task-understanding/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ivan-smirnov/task-understanding/releases/tag/v0.1.0
