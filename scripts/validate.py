@@ -49,6 +49,7 @@ REQUIRED_FILES = {
     Path("CONTRIBUTING.md"),
     Path("SECURITY.md"),
     Path("TESTING.md"),
+    Path("assets/readme-cover-v1.png"),
     Path("examples/new-brief.md"),
     Path("examples/scope-change.md"),
     Path("evals/evals.json"),
@@ -68,9 +69,9 @@ EXPECTED_EXAMPLES = {"new-brief.md", "scope-change.md"}
 ALLOWED_FRONTMATTER_KEYS = {"name", "description", "license", "metadata"}
 EXPECTED_METADATA = {
     "author": "Ivan Smirnov",
-    "version": "0.1.0",
     "language": "ru",
 }
+BINARY_ASSETS = {Path("assets/readme-cover-v1.png")}
 EXPECTED_EVAL_IDS = {
     "explicit-new-external-brief",
     "implicit-ordinary-production-request",
@@ -324,6 +325,11 @@ def validate_skill(check: Validation) -> None:
                 metadata.get(key) == expected_value,
                 f"frontmatter metadata.{key} must be {expected_value!r}",
             )
+        version = metadata.get("version")
+        check.require(
+            isinstance(version, str) and bool(re.fullmatch(r"\d+\.\d+\.\d+", version)),
+            "frontmatter metadata.version must be a Semantic Versioning number",
+        )
 
     check.require(bool(body.strip()), "SKILL.md instructions cannot be empty")
     check.require("## Что требует уточнения" in body, "SKILL.md must define the per-section problem summary")
@@ -567,8 +573,8 @@ def validate_license_and_docs(check: Validation) -> None:
             "README.md must display the validation workflow badge",
         )
         check.require(
-            "releases/tag/v0.1.0" in readme,
-            "README.md must link to the v0.1.0 release",
+            "releases/tag/v" in readme,
+            "README.md must link to a versioned GitHub release",
         )
         check.require(
             "t.me/" not in readme,
@@ -1211,6 +1217,8 @@ def validate_evals(check: Validation) -> None:
 def iter_package_text(check: Validation):
     for path in sorted(check.root.rglob("*")):
         if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
+            continue
+        if path.relative_to(check.root) in BINARY_ASSETS:
             continue
         try:
             yield path, path.read_text(encoding="utf-8")

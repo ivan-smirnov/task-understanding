@@ -4,9 +4,11 @@
 [![GitHub release](https://img.shields.io/github/v/release/ivan-smirnov/task-understanding)](https://github.com/ivan-smirnov/task-understanding/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+![Понимание задачи: от разрозненного брифа к согласованной постановке](assets/readme-cover-v1.png)
+
 Русскоязычный Agent Skill, который превращает разрозненные клиентские материалы в постановку задачи, пригодную для согласования и дальнейшей работы.
 
-Текущий релиз: [`v0.1.0`](https://github.com/ivan-smirnov/task-understanding/releases/tag/v0.1.0) от 4 сентября 2026 года. Изменения перечислены в [CHANGELOG.md](CHANGELOG.md).
+Текущий релиз: [`v0.2.0`](https://github.com/ivan-smirnov/task-understanding/releases/tag/v0.2.0) от 5 сентября 2026 года. Изменения перечислены в [CHANGELOG.md](CHANGELOG.md).
 
 ## Что делает Skill
 
@@ -65,7 +67,7 @@ Codex и Cursor читают пользовательские Skills из `$HOME
 
 ```bash
 mkdir -p "$HOME/.agents/skills"
-git clone --branch v0.1.0 --depth 1 \
+git clone --branch v0.2.0 --depth 1 \
   https://github.com/ivan-smirnov/task-understanding.git \
   "$HOME/.agents/skills/task-understanding"
 ```
@@ -90,7 +92,7 @@ $task-understanding Разбери приложенный клиентский �
 
 ```bash
 mkdir -p "$HOME/.claude/skills"
-git clone --branch v0.1.0 --depth 1 \
+git clone --branch v0.2.0 --depth 1 \
   https://github.com/ivan-smirnov/task-understanding.git \
   "$HOME/.claude/skills/task-understanding"
 ```
@@ -109,7 +111,7 @@ git clone --branch v0.1.0 --depth 1 \
 
 ```bash
 mkdir -p .agents/skills
-git clone --branch v0.1.0 --depth 1 \
+git clone --branch v0.2.0 --depth 1 \
   https://github.com/ivan-smirnov/task-understanding.git \
   .agents/skills/task-understanding
 ```
@@ -137,7 +139,7 @@ $task-understanding
 
 Один `SKILL.md` рассчитан на открытый формат Agent Skills. Строгий запрет неявного запуска в Codex задаётся в `agents/openai.yaml`; для Cursor и Claude Code граница задана инструкциями Skill, но равнозначная техническая гарантия не заявляется.
 
-| Клиент | Проверенное окружение | Состояние проверки `v0.1.0` |
+| Клиент | Проверенное окружение | Состояние проверки `v0.2.0` |
 |---|---|---|
 | Codex CLI | `0.153.0` | `TU-01`–`TU-08`: PASS; результаты зафиксированы в `TESTING.md` |
 | Cursor | приложение `3.19.7`, Agent CLI `2026.09.02-c22c1a3` | `TU-01`, `TU-02`, `TU-08`: PASS; результаты зафиксированы в `TESTING.md` |
