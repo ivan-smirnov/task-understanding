@@ -25,3 +25,6 @@ jobs:
 
       - name: Validate public skill package
         run: python3 scripts/validate.py
+
+      - name: Run validator regression tests
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
